@@ -1,174 +1,127 @@
-# Support Ticket Triage Classifier
+# Support Ticket Triage Assistant
 
-A machine learning solution and web application designed to automatically classify incoming customer support tickets into four functional categories: **Billing**, **Technical**, **Account**, and **General**.
+A small AI application that reads an incoming customer-support message and decides how it
+should be handled: what category it belongs to, how urgent it is, which team should own it,
+whether a person needs to double-check it, and a first-reply draft to speed up the response.
 
-Built with **Python**, **scikit-learn**, **Flask**, and a responsive **Light Theme Web Interface**, this prototype provides automated classification, confidence scoring, priority assignment, SLA determination, auto-response draft generation, bulk processing, and live active-learning retraining.
+Final deliverable for the SWYNEX AI Internship, bringing together Tasks 1–3 into one
+runnable application.
 
----
-
-## 🌟 Executive Summary
-
-In high-volume customer support operations, manually categorizing and assigning incoming support tickets introduces delays and routing errors. This project implements a lightweight NLP pipeline that classifies tickets upon arrival, exposing confidence scores and routing details to assist support teams and automate initial triage.
-
-### Core Capabilities
-
-- **NLP Classification Engine**: TF-IDF Vectorization combined with Logistic Regression for fast, deterministic inference without external GPU or paid API key dependencies.
-- **Light UI**: Responsive Single-Page Application (SPA) designed with a clean light color palette, interactive confidence meters, and category probability distribution charts.
-- **Smart Triage & SLA Routing**: Automatically derives priority level (`High`, `Medium`, `Low`), target SLA countdowns, and assigned handling teams.
-- **Automated Response Generator**: Produces initial customer response drafts with 1-click clipboard copy functionality.
-- **Session History Log & CSV Export**: Tracks classified tickets in a filterable table with export capabilities.
-- **Bulk Batch Processing**: Classifies multi-line ticket entries concurrently.
-- **Model Analytics & Diagnostics**: Exposes real-time Macro F1 scores, accuracy ratings, per-class evaluation metrics, and a Confusion Matrix matrix.
-- **Active Learning Retraining**: Interface to submit new labeled ticket examples and trigger live model retraining.
 
 ---
 
-## 📁 Repository Structure
+## 1. The problem
 
-```
-├── app.py                 # Flask REST API backend & scikit-learn model engine
-├── ticket_intelligence.py # Task 3 intelligent decision layer & cross-validation engine
-├── ticket_classifier.py   # Standalone CLI prototype and evaluation script
-├── requirements.txt       # Project dependencies (Flask, scikit-learn, numpy, jupyter)
-├── README.md              # Project documentation
-└── static/                # Single Page Application frontend
-    ├── index.html         # HTML5 UI structure
-    ├── css/
-    │   └── style.css      # CSS design system (Light Theme)
-    └── js/
-        └── app.js         # Frontend application logic & REST API integration
-```
+Support teams receive a constant stream of tickets that all need the same first step:
+figure out what the ticket is about and who should handle it. Done by hand, this is slow
+and inconsistent — two agents can categorize the same ticket differently, and low-priority
+questions can sit in the same queue as urgent outages.
 
----
+**Target user:** a support team lead or triage agent who wants incoming tickets sorted and
+routed automatically, with a clear signal for when to step in personally.
 
-## ⚙️ Technology Stack
+**Task:** given the raw text of a ticket, predict one of four categories — **Billing**,
+**Technical**, **Account**, **General** — and turn that prediction into an actionable
+routing decision.
 
-- **Machine Learning**: `scikit-learn` (`TfidfVectorizer`, `LogisticRegression`)
-- **Backend API**: `Flask` (Python RESTful Web Server)
-- **Frontend**: HTML5, Vanilla CSS3 (Custom Light Theme), JavaScript (ES6+)
-- **Typography & Icons**: Google Fonts (`Outfit`, `Inter`), FontAwesome 6
+## 2. Method
 
----
+**Model:** a TF-IDF vectorizer (unigrams + bigrams) feeding a multinomial Logistic
+Regression classifier — scikit-learn, no external API, no GPU required.
 
-## 📊 Model Architecture & Performance
+**Training data:** 160 labeled example tickets, 40 per category, written to reflect
+realistic phrasing for each category while minimizing vocabulary overlap between
+categories (see Task 3 for the failure-case work that shaped this).
 
-The classifier uses an $N$-gram TF-IDF pipeline paired with a multi-class Logistic Regression classifier calibrated for support ticket language patterns.
+**Evaluation:** 5-fold stratified cross-validation, since a single train/test split on a
+dataset this size is too noisy to trust on its own.
+- **Cross-validated macro F1: ~0.94**
+- **Held-out split macro F1: ~0.93**
 
-### Dataset Categories
+**The intelligent layer on top of the prediction** (`ticket_intelligence.py`):
+- **Priority & SLA** — derived from category, escalated to High if urgency language
+  ("urgent", "asap", "locked out", etc.) appears in the text
+- **Routing team** — which internal team should own the ticket
+- **Confidence-gated human review** — predictions below 40% confidence are flagged for a
+  person instead of being auto-routed
+- **Auto-response draft** — a first-reply template per category
 
-| Category | Description | Primary Keywords / Signals |
-| :--- | :--- | :--- |
-| **Billing** | Charges, invoices, payment failures, refunds | `charged`, `invoice`, `refund`, `card`, `subscription` |
-| **Technical** | Crashes, HTTP errors, API timeouts, system bugs | `crash`, `500 error`, `timeout`, `freeze`, `broken` |
-| **Account** | Passwords, 2FA, ownership, SSO, workspace access | `password`, `locked`, `email`, `2FA`, `ownership` |
-| **General** | Sales inquiries, pricing, support hours, docs | `support hours`, `discount`, `documentation`, `pricing` |
+**Error handling:** `classify_ticket()` never raises. Empty text, `None`, wrong types,
+too-short text, and oversized text (truncated rather than rejected) all return a structured
+result instead of crashing the app — verified with explicit test cases in
+`demo_task3.ipynb` (carried over from Task 3).
 
-### Benchmark Metrics
+## 3. The application
 
-- **5-Fold Cross-Validation Macro F1**: `0.944 (+/- 0.024)`
-- **Held-Out Test Macro F1-Score**: `0.926`
-- **Overall Accuracy**: `>92%`
-- **Dataset Size**: `160 balanced ticket samples` (40 Billing, 40 Technical, 40 Account, 40 General)
-- **Inference Latency**: `< 5ms` per ticket
+A Flask backend (`app.py`) serves a single-page interface (`static/`) where anyone can
+paste a support message and see the full routing decision — no command line required.
 
----
+**API:**
+- `POST /api/classify` — `{"text": "..."}` → category, confidence, priority, SLA, routing
+  team, human-review flag, and a draft reply
+- `GET /api/metrics` — the model's cross-validated macro F1 and dataset size, so the
+  evaluation numbers above are visible from the running app itself, not just this README
 
-## 🔌 REST API Reference
+### Run it locally
 
-### 1. Classify Single Ticket
-```http
-POST /api/classify
-Content-Type: application/json
-
-{
-  "text": "I was charged twice for my subscription this month"
-}
+```bash
+pip install -r requirements.txt
+python app.py        # or: py app.py  (Windows)
 ```
 
-**Response:**
-```json
-{
-  "text": "I was charged twice for my subscription this month",
-  "category": "Billing",
-  "confidence": 0.7842,
-  "probabilities": {
-    "Billing": 0.7842,
-    "Technical": 0.0812,
-    "Account": 0.0721,
-    "General": 0.0625
-  },
-  "priority": "High",
-  "routing_team": "Finance & Billing Ops",
-  "sla": "4 Hours",
-  "auto_response": "Hello! We received your billing inquiry regarding 'I was charged twice for my subscription th...'."
-}
-```
+Then open **http://127.0.0.1:5000** in a browser. Click one of the example chips (or paste
+your own message) and press **Classify ticket**.
 
-### 2. Batch Classification
-```http
-POST /api/classify-batch
-Content-Type: application/json
+### Demo
 
-{
-  "tickets": [
-    "I was charged twice for my subscription",
-    "App crashes on report PDF export"
-  ]
-}
-```
+Take a look at the video below to see the project in action, including its main features, functionality, and overall user experience.
 
-### 3. Model Metrics
-```http
-GET /api/metrics
-```
+## 📹 Demo
 
-### 4. Active Retraining
-```http
-POST /api/retrain
-Content-Type: application/json
 
-{
-  "text": "Can you update our corporate tax ID on invoice PDF downloads?",
-  "category": "Billing"
-}
-```
+https://github.com/user-attachments/assets/e872fd7a-11ae-48e8-9008-b25a02182799
 
----
 
-## 🚀 Installation & Running Locally
+## 4. Limitations
 
-### Prerequisites
+- **Small, synthetic-style training set.** 160 examples is enough to demonstrate the
+  approach cleanly, but a production system would need real historical tickets — actual
+  customer language is messier (typos, mixed languages, multiple issues in one message)
+  than the training examples here.
+- **English only.** No handling for other languages or heavily code-mixed text.
+- **Single-label only.** A ticket that's genuinely both a Billing and a Technical issue
+  gets forced into one category.
+- **Static model.** The model is trained once at startup; it doesn't learn from corrections
+  an agent makes, though `classify_ticket()`'s structured output is designed to make adding
+  that feedback loop straightforward later.
+- **The 0.94 macro F1 reflects this specific dataset.** On messier, real-world tickets
+  with more overlapping vocabulary, accuracy would likely be lower — the honest failure
+  analysis in Task 3 is the more realistic preview of where a larger real dataset would
+  still trip the model up.
 
-- Python 3.9 or higher
-- `pip` package manager
+## 5. Ethics notes
 
-### Setup
+- **Human-in-the-loop by design, not by accident.** The confidence-gated review flag exists
+  specifically so low-confidence predictions reach a person before any automated action is
+  taken on them — this app is built to assist triage, not to fully replace a human decision
+  on ambiguous tickets.
+- **No sensitive data is stored or logged.** Ticket text is processed in memory for a
+  single request and not written to disk, a database, or any third-party service.
+- **Transparency of confidence.** The interface always shows the model's confidence
+  alongside its prediction, rather than presenting a single "answer" as if it were certain.
+- **Risk of miscategorization at the edges.** As the Task 3 failure analysis showed, short
+  or ambiguous tickets are the most likely to be misrouted. In a real deployment, priority
+  categories tied to safety or account security (e.g., "Account" tickets involving a locked
+  account) should have a lower auto-review threshold than lower-stakes categories, since the
+  cost of a missed urgent ticket is higher than the cost of an unnecessary human review.
+- **No demographic or personal data is used or required** — classification is based solely
+  on the ticket's text content.
 
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/SuhasSakri/SWYNEX-Model-or-API-Integration.git
-   cd SWYNEX-Model-or-API-Integration
-   ```
+## Repository contents
 
-2. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Launch the Web Application**
-   ```bash
-   python app.py
-   ```
-   *(Or using the Python launcher on Windows: `py app.py`)*
-
-4. **Access the Interface**
-   Open your browser and navigate to:
-   ```
-   http://127.0.0.1:5000
-   ```
-
----
-
-## 📄 License & Internship Context
-
-Developed as part of **Task 2: Model or API Integration** for the **SWYNEX AI Internship**.
+| File | Purpose |
+|---|---|
+| `app.py` | Flask backend — trains the model at startup, serves the UI and API |
+| `ticket_intelligence.py` | Training data, model pipeline, cross-validation, and the `classify_ticket()` intelligent feature with error handling |
+| `static/` | The single-page frontend (HTML/CSS/JS, no build step) |
+| `requirements.txt` | Dependencies: Flask, scikit-learn, numpy |
